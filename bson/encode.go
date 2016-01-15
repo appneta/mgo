@@ -106,7 +106,7 @@ func (e *encoder) addDoc(v reflect.Value) {
 		if len(raw.Data) == 0 {
 			panic("Attempted to marshal empty Raw document")
 		}
-		e.addBytes(raw.Data...)
+		e.addBytes([]byte(raw.Data)...)
 		return
 	}
 
@@ -396,11 +396,11 @@ func (e *encoder) addElem(name string, v reflect.Value, minSize bool) {
 				panic("Attempted to marshal empty Raw document")
 			}
 			e.addElemName(kind, name)
-			e.addBytes(s.Data...)
+			e.addBytes([]byte(s.Data)...)
 
 		case Binary:
 			e.addElemName('\x05', name)
-			e.addBinary(s.Kind, s.Data)
+			e.addBinary(s.Kind, []byte(s.Data))
 
 		case DBPointer:
 			e.addElemName('\x0C', name)

@@ -144,7 +144,7 @@ func (d D) Map() (m M) {
 //
 type Raw struct {
 	Kind byte
-	Data []byte
+	Data string
 }
 
 // RawD represents a BSON document containing raw unprocessed elements.
@@ -200,7 +200,6 @@ func readRandomUint32() uint32 {
 	}
 	return uint32((uint32(b[0]) << 0) | (uint32(b[1]) << 8) | (uint32(b[2]) << 16) | (uint32(b[3]) << 24))
 }
-
 
 // machineId stores machine id generated once and used in subsequent calls
 // to NewObjectId function.
@@ -379,7 +378,7 @@ var Undefined undefined
 //
 type Binary struct {
 	Kind byte
-	Data []byte
+	Data string
 }
 
 // RegEx represents a regular expression.  The Options field may contain
@@ -510,7 +509,7 @@ func Marshal(in interface{}) (out []byte, err error) {
 func Unmarshal(in []byte, out interface{}) (err error) {
 	if raw, ok := out.(*Raw); ok {
 		raw.Kind = 3
-		raw.Data = in
+		raw.Data = string(in)
 		return nil
 	}
 	defer handleErr(&err)
@@ -519,7 +518,7 @@ func Unmarshal(in []byte, out interface{}) (err error) {
 	case reflect.Ptr:
 		fallthrough
 	case reflect.Map:
-		d := newDecoder(in)
+		d := newDecoder(string(in))
 		d.readDocTo(v)
 	case reflect.Struct:
 		return errors.New("Unmarshal can't deal with struct values. Use a pointer.")
@@ -527,6 +526,15 @@ func Unmarshal(in []byte, out interface{}) (err error) {
 		return errors.New("Unmarshal needs a map or a pointer to a struct.")
 	}
 	return nil
+}
+
+type SettableMap interface {
+	Set(key string, val interface{})
+}
+
+func UnmarshalToSettableMap(in []byte, out SettableMap) {
+	d := newDecoder(string(in))
+	d.readToSettableMap(out)
 }
 
 // Unmarshal deserializes raw into the out value.  If the out value type

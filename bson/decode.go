@@ -38,14 +38,14 @@ import (
 )
 
 type decoder struct {
-	in      []byte
+	in      string
 	i       int
 	docType reflect.Type
 }
 
 var typeM = reflect.TypeOf(M{})
 
-func newDecoder(in []byte) *decoder {
+func newDecoder(in string) *decoder {
 	return &decoder{in, 0, typeM}
 }
 
@@ -122,6 +122,34 @@ func clearMap(m reflect.Value) {
 	var none reflect.Value
 	for _, k := range m.MapKeys() {
 		m.SetMapIndex(k, none)
+	}
+}
+
+func (d *decoder) readToSettableMap(out SettableMap) {
+	end := int(d.readInt32())
+	end += d.i - 4
+	if end <= d.i || end > len(d.in) || d.in[end-1] != '\x00' {
+		corrupted()
+	}
+	var val interface{}
+	for d.in[d.i] != '\x00' {
+		kind := d.readByte()
+		name := d.readCStr()
+		if d.i >= end {
+			corrupted()
+		}
+
+		if d.readElemToInterface(&val, kind) {
+			out.Set(name, val)
+		}
+
+		if d.i >= end {
+			corrupted()
+		}
+	}
+	d.i++ // '\x00'
+	if d.i != end {
+		corrupted()
 	}
 }
 
@@ -729,13 +757,76 @@ func (d *decoder) readElemTo(out reflect.Value, kind byte) (good bool) {
 		}
 		if outt == typeBinary {
 			if b, ok := in.([]byte); ok {
-				out.Set(reflect.ValueOf(Binary{Data: b}))
+				out.Set(reflect.ValueOf(Binary{Data: string(b)}))
 				return true
 			}
 		}
 	}
 
 	return false
+}
+
+func (d *decoder) readElemToInterface(val *interface{}, kind byte) (good bool) {
+	switch kind {
+	case 0x01: // Float64
+		*val = d.readFloat64()
+	case 0x02: // UTF-8 string
+		*val = d.readStr()
+	case 0x03: // Document
+		*val = M{}
+		d.readDocTo(reflect.ValueOf(*val))
+	case 0x04: // Array
+		*val = d.readSliceDoc(typeSlice)
+	case 0x05: // Binary
+		b := d.readBinary()
+		if b.Kind == 0x00 || b.Kind == 0x02 {
+			*val = b.Data
+		} else {
+			*val = b
+		}
+	case 0x06: // Undefined (obsolete, but still seen in the wild)
+		*val = Undefined
+	case 0x07: // ObjectId
+		*val = ObjectId(d.readBytes(12))
+	case 0x08: // Bool
+		*val = d.readBool()
+	case 0x09: // Timestamp
+		// MongoDB handles timestamps as milliseconds.
+		i := d.readInt64()
+		if i == -62135596800000 {
+			*val = time.Time{} // In UTC for convenience.
+		} else {
+			*val = time.Unix(i/1e3, i%1e3*1e6)
+		}
+	case 0x0A: // Nil
+		*val = nil
+	case 0x0B: // RegEx
+		*val = d.readRegEx()
+	case 0x0C:
+		*val = DBPointer{Namespace: d.readStr(), Id: ObjectId(d.readBytes(12))}
+	case 0x0D: // JavaScript without scope
+		*val = JavaScript{Code: d.readStr()}
+	case 0x0E: // Symbol
+		*val = Symbol(d.readStr())
+	case 0x0F: // JavaScript with scope
+		d.i += 4 // Skip length
+		js := JavaScript{d.readStr(), make(M)}
+		d.readDocTo(reflect.ValueOf(js.Scope))
+		*val = js
+	case 0x10: // Int32
+		*val = int(d.readInt32())
+	case 0x11: // Mongo-specific timestamp
+		*val = MongoTimestamp(d.readInt64())
+	case 0x12: // Int64
+		*val = d.readInt64()
+	case 0x7F: // Max key
+		*val = MaxKey
+	case 0xFF: // Min key
+		*val = MinKey
+	default:
+		panic(fmt.Sprintf("Unknown element kind (0x%02X)", kind))
+	}
+	return true
 }
 
 // --------------------------------------------------------------------------
@@ -766,7 +857,7 @@ func (d *decoder) readStr() string {
 	if d.readByte() != '\x00' {
 		corrupted()
 	}
-	return string(b)
+	return b
 }
 
 func (d *decoder) readCStr() string {
@@ -782,7 +873,7 @@ func (d *decoder) readCStr() string {
 	if d.i > l {
 		corrupted()
 	}
-	return string(d.in[start:end])
+	return d.in[start:end]
 }
 
 func (d *decoder) readBool() bool {
@@ -829,7 +920,7 @@ func (d *decoder) readByte() byte {
 	return d.in[i]
 }
 
-func (d *decoder) readBytes(length int32) []byte {
+func (d *decoder) readBytes(length int32) string {
 	if length < 0 {
 		corrupted()
 	}
