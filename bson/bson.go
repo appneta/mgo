@@ -532,9 +532,11 @@ type SettableMap interface {
 	Set(key string, val interface{})
 }
 
-func UnmarshalToSettableMap(in []byte, out SettableMap) {
+func UnmarshalToSettableMap(in []byte, out SettableMap) (err error) {
+	defer handleErr(&err)
 	d := newDecoder(string(in))
 	d.readToSettableMap(out)
+	return nil
 }
 
 // Unmarshal deserializes raw into the out value.  If the out value type
