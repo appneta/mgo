@@ -529,12 +529,17 @@ func Unmarshal(in []byte, out interface{}) (err error) {
 }
 
 type SettableMap interface {
-	Set(key string, val interface{})
+	// SetInterface(key string, val interface{})
+	SetString(key string, val string)
+	SetBool(key string, val bool)
+	SetInt64(key string, val int64)
+	// SetStringSlice(key string, val []string)
+	SetBsonMap(key string, val M)
 }
 
-func UnmarshalToSettableMap(in []byte, out SettableMap) (err error) {
+func UnmarshalToSettableMap(in string, out SettableMap) (err error) {
 	defer handleErr(&err)
-	d := newDecoder(string(in))
+	d := newDecoder(in)
 	d.readToSettableMap(out)
 	return nil
 }

@@ -131,7 +131,6 @@ func (d *decoder) readToSettableMap(out SettableMap) {
 	if end <= d.i || end > len(d.in) || d.in[end-1] != '\x00' {
 		corrupted()
 	}
-	var val interface{}
 	for d.in[d.i] != '\x00' {
 		kind := d.readByte()
 		name := d.readCStr()
@@ -139,9 +138,7 @@ func (d *decoder) readToSettableMap(out SettableMap) {
 			corrupted()
 		}
 
-		if d.readElemToInterface(&val, kind) {
-			out.Set(name, val)
-		}
+		d.readElemToSettableMapKey(out, name, kind)
 
 		if d.i >= end {
 			corrupted()
@@ -150,6 +147,84 @@ func (d *decoder) readToSettableMap(out SettableMap) {
 	d.i++ // '\x00'
 	if d.i != end {
 		corrupted()
+	}
+}
+
+func (d *decoder) readElemToSettableMapKey(out SettableMap, key string, kind byte) {
+	defer func() {
+		if e := recover(); e != nil {
+			panic(fmt.Sprintf("panic during readElemToSettableMapKey for key %s: %s", key, e))
+		}
+	}()
+	switch kind {
+	case 0x01: // Float64
+		// read and throw away
+		d.readFloat64()
+		// out.SetInt64(key, int64(d.readFloat64()))
+	case 0x02: // UTF-8 string
+		out.SetString(key, d.readStr())
+	case 0x03: // Document
+		doc := M{}
+		d.readDocTo(reflect.ValueOf(doc))
+		out.SetBsonMap(key, doc)
+	case 0x04: // Array
+		if key == "Edge" {
+			panic("Edge encountered as slice. This needs to be tested & verified.")
+			// out.SetStringSlice(key, d.readStringSliceDoc(typeSlice))
+		} else {
+			d.discardSliceDoc(typeSlice)
+		}
+	case 0x05: // Binary
+		b := d.readBinary()
+		if b.Kind == 0x00 || b.Kind == 0x02 {
+			out.SetString(key, b.Data)
+		} else {
+			panic("bson decode got weird binary data")
+			// out.SetInterface(key, b)
+		}
+	// case 0x06: // Undefined (obsolete, but still seen in the wild)
+	// 	out.SetInterface(key, Undefined)
+	// case 0x07: // ObjectId
+	// 	out.SetInterface(key, ObjectId(d.readBytes(12)))
+	case 0x08: // Bool
+		out.SetBool(key, d.readBool())
+	case 0x09: // Timestamp
+		// read and throw away
+		d.readInt64()
+		// MongoDB handles timestamps as milliseconds.
+		// i := d.readInt64()
+		// if i == -62135596800000 {
+		// 	out.SetInterface(key, time.Time{}) // In UTC for convenience.
+		// } else {
+		// 	out.SetInterface(key, time.Unix(i/1e3, i%1e3*1e6))
+		// }
+	// case 0x0A: // Nil
+	// 	out.SetInterface(key, nil)
+	// case 0x0B: // RegEx
+	// 	out.SetInterface(key, d.readRegEx())
+	// case 0x0C:
+	// 	out.SetInterface(key, DBPointer{Namespace: d.readStr(), Id: ObjectId(d.readBytes(12))})
+	// case 0x0D: // JavaScript without scope
+	// 	out.SetInterface(key, JavaScript{Code: d.readStr()})
+	// case 0x0E: // Symbol
+	// 	out.SetInterface(key, Symbol(d.readStr()))
+	// case 0x0F: // JavaScript with scope
+	// 	d.i += 4 // Skip length
+	// 	js := JavaScript{d.readStr(), make(M)}
+	// 	d.readDocTo(reflect.ValueOf(js.Scope))
+	// 	out.SetInterface(key, js)
+	case 0x10: // Int32
+		out.SetInt64(key, int64(d.readInt32()))
+	// case 0x11: // Mongo-specific timestamp
+	// 	out.SetInterface(key, MongoTimestamp(d.readInt64()))
+	case 0x12: // Int64
+		out.SetInt64(key, d.readInt64())
+	// case 0x7F: // Max key
+	// 	out.SetInterface(key, MaxKey)
+	// case 0xFF: // Min key
+	// 	out.SetInterface(key, MinKey)
+	default:
+		panic(fmt.Sprintf("Unknown element kind (0x%02X)", kind))
 	}
 }
 
@@ -391,6 +466,102 @@ func (d *decoder) readSliceDoc(t reflect.Type) interface{} {
 		slice.Index(i).Set(tmp[i])
 	}
 	return slice.Interface()
+}
+
+func (d *decoder) readStringSliceDoc(t reflect.Type) []string {
+	tmp := []string{}
+
+	end := int(d.readInt32())
+	end += d.i - 4
+	if end <= d.i || end > len(d.in) || d.in[end-1] != '\x00' {
+		corrupted()
+	}
+	for d.in[d.i] != '\x00' {
+		kind := d.readByte()
+		for d.i < end && d.in[d.i] != '\x00' {
+			d.i++
+		}
+		if d.i >= end {
+			corrupted()
+		}
+		d.i++
+		switch kind {
+		// case 0x01:
+		// 	tmp = append(tmp, fmt.Sprintf("%f", d.readFloat64()))
+		case 0x02:
+			tmp = append(tmp, d.readStr())
+		// case 0x08:
+		// 	if d.readBool() {
+		// 		tmp = append(tmp, "true")
+		// 	} else {
+		// 		tmp = append(tmp, "false")
+		// 	}
+		// case 0x09: // timestamp
+		// 	tmp = append(tmp, fmt.Sprintf("%d", d.readInt64()))
+		// case 0x0A: // nil
+		// 	tmp = append(tmp, "")
+		// case 0x10:
+		// 	tmp = append(tmp, fmt.Sprintf("%d", d.readInt32()))
+		// case 0x12:
+		// 	tmp = append(tmp, fmt.Sprintf("%d", d.readInt64()))
+		default:
+			panic(fmt.Sprintf("readStringSliceDoc encountered weird kind %d", kind))
+		}
+
+		if d.i >= end {
+			corrupted()
+		}
+	}
+	d.i++ // '\x00'
+	if d.i != end {
+		corrupted()
+	}
+
+	return tmp
+}
+
+func (d *decoder) discardSliceDoc(t reflect.Type) {
+	end := int(d.readInt32())
+	end += d.i - 4
+	if end <= d.i || end > len(d.in) || d.in[end-1] != '\x00' {
+		corrupted()
+	}
+	for d.in[d.i] != '\x00' {
+		kind := d.readByte()
+		for d.i < end && d.in[d.i] != '\x00' {
+			d.i++
+		}
+		if d.i >= end {
+			corrupted()
+		}
+		d.i++
+		switch kind {
+		case 0x01:
+			d.readFloat64()
+		case 0x02:
+			d.readStr()
+		case 0x08:
+			d.readBool()
+		case 0x09: // timestamp
+			d.readInt64()
+		case 0x0A: // nil
+			// noop
+		case 0x10:
+			d.readInt32()
+		case 0x12:
+			d.readInt64()
+		default:
+			panic(fmt.Sprintf("readStringSliceDoc encountered weird kind %d", kind))
+		}
+
+		if d.i >= end {
+			corrupted()
+		}
+	}
+	d.i++ // '\x00'
+	if d.i != end {
+		corrupted()
+	}
 }
 
 var typeSlice = reflect.TypeOf([]interface{}{})
