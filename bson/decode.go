@@ -198,8 +198,8 @@ func (d *decoder) readElemToSettableMapKey(out SettableMap, key string, kind byt
 		// } else {
 		// 	out.SetInterface(key, time.Unix(i/1e3, i%1e3*1e6))
 		// }
-	// case 0x0A: // Nil
-	// 	out.SetInterface(key, nil)
+	case 0x0A: // Nil
+		// Ignore nil values
 	// case 0x0B: // RegEx
 	// 	out.SetInterface(key, d.readRegEx())
 	// case 0x0C:
