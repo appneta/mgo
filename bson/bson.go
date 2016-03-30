@@ -553,11 +553,10 @@ func Unmarshal(in []byte, out interface{}) (err error) {
 }
 
 type SettableMap interface {
-	// SetInterface(key string, val interface{})
-	SetString(key string, val string)
+	Set(key string, val interface{})
+	SetString(key string, val string, binary bool)
 	SetBool(key string, val bool)
 	SetInt64(key string, val int64)
-	// SetStringSlice(key string, val []string)
 	SetBsonMap(key string, val M)
 }
 

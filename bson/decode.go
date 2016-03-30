@@ -158,11 +158,10 @@ func (d *decoder) readElemToSettableMapKey(out SettableMap, key string, kind byt
 	}()
 	switch kind {
 	case 0x01: // Float64
-		// read and throw away
-		d.readFloat64()
-		// out.SetInt64(key, int64(d.readFloat64()))
+		// panic("bson decode encountered float64")
+		out.SetInt64(key, int64(d.readFloat64()))
 	case 0x02: // UTF-8 string
-		out.SetString(key, d.readStr())
+		out.SetString(key, d.readStr(), false)
 	case 0x03: // Document
 		doc := M{}
 		d.readDocTo(reflect.ValueOf(doc))
@@ -172,12 +171,12 @@ func (d *decoder) readElemToSettableMapKey(out SettableMap, key string, kind byt
 			panic("Edge encountered as slice. This needs to be tested & verified.")
 			// out.SetStringSlice(key, d.readStringSliceDoc(typeSlice))
 		} else {
-			d.discardSliceDoc(typeSlice)
+			out.Set(key, d.readSliceDoc(typeSlice))
 		}
 	case 0x05: // Binary
 		b := d.readBinary()
 		if b.Kind == 0x00 || b.Kind == 0x02 {
-			out.SetString(key, b.Data)
+			out.SetString(key, b.Data, true)
 		} else {
 			panic("bson decode got weird binary data")
 			// out.SetInterface(key, b)
